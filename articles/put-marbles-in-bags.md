@@ -651,24 +651,24 @@ class Solution:
         if k == 1:
             return 0
 
-        max_heap = []
         min_heap = []
+        max_heap = []
 
         for i in range(len(weights) - 1):
             split = weights[i] + weights[i + 1]
 
-            if len(max_heap) < k - 1:
-                heapq.heappush(max_heap, split)
-            else:
-                heapq.heappushpop(max_heap, split)
-
             if len(min_heap) < k - 1:
-                heapq.heappush(min_heap, -split)
+                heapq.heappush(min_heap, split)
             else:
-                heapq.heappushpop(min_heap, -split)
+                heapq.heappushpop(min_heap, split)
 
-        max_score = sum(max_heap)
-        min_score = -sum(min_heap)
+            if len(max_heap) < k - 1:
+                heapq.heappush(max_heap, -split)
+            else:
+                heapq.heappushpop(max_heap, -split)
+
+        max_score = sum(min_heap)
+        min_score = -sum(max_heap)
         return max_score - min_score
 ```
 
@@ -677,28 +677,28 @@ public class Solution {
     public long putMarbles(int[] weights, int k) {
         if (k == 1) return 0L;
 
-        PriorityQueue<Integer> maxHeap = new PriorityQueue<>();
-        PriorityQueue<Integer> minHeap = new PriorityQueue<>(Collections.reverseOrder());
+        PriorityQueue<Integer> minHeap = new PriorityQueue<>();
+        PriorityQueue<Integer> maxHeap = new PriorityQueue<>(Collections.reverseOrder());
 
         for (int i = 0; i < weights.length - 1; i++) {
             int split = weights[i] + weights[i + 1];
 
-            if (maxHeap.size() < k - 1) maxHeap.offer(split);
-            else if (split > maxHeap.peek()) {
-                maxHeap.poll();
-                maxHeap.offer(split);
-            }
-
             if (minHeap.size() < k - 1) minHeap.offer(split);
-            else if (split < minHeap.peek()) {
+            else if (split > minHeap.peek()) {
                 minHeap.poll();
                 minHeap.offer(split);
+            }
+
+            if (maxHeap.size() < k - 1) maxHeap.offer(split);
+            else if (split < maxHeap.peek()) {
+                maxHeap.poll();
+                maxHeap.offer(split);
             }
         }
 
         long maxScore = 0, minScore = 0;
-        for (int val : maxHeap) maxScore += val;
-        for (int val : minHeap) minScore += val;
+        for (int val : minHeap) maxScore += val;
+        for (int val : maxHeap) minScore += val;
 
         return maxScore - minScore;
     }
@@ -711,33 +711,33 @@ public:
     long long putMarbles(vector<int>& weights, int k) {
         if (k == 1) return 0LL;
 
-        priority_queue<int, vector<int>, greater<int>> maxHeap;
-        priority_queue<int> minHeap;
+        priority_queue<int, vector<int>, greater<int>> minHeap;
+        priority_queue<int> maxHeap;
 
         for (int i = 0; i < weights.size() - 1; ++i) {
             int split = weights[i] + weights[i + 1];
 
-            if ((int)maxHeap.size() < k - 1) maxHeap.push(split);
-            else if (split > maxHeap.top()) {
-                maxHeap.pop();
-                maxHeap.push(split);
-            }
-
             if ((int)minHeap.size() < k - 1) minHeap.push(split);
-            else if (split < minHeap.top()) {
+            else if (split > minHeap.top()) {
                 minHeap.pop();
                 minHeap.push(split);
+            }
+
+            if ((int)maxHeap.size() < k - 1) maxHeap.push(split);
+            else if (split < maxHeap.top()) {
+                maxHeap.pop();
+                maxHeap.push(split);
             }
         }
 
         long long maxScore = 0, minScore = 0;
-        while (!maxHeap.empty()) {
-            maxScore += maxHeap.top();
-            maxHeap.pop();
-        }
         while (!minHeap.empty()) {
-            minScore += minHeap.top();
+            maxScore += minHeap.top();
             minHeap.pop();
+        }
+        while (!maxHeap.empty()) {
+            minScore += maxHeap.top();
+            maxHeap.pop();
         }
 
         return maxScore - minScore;
@@ -783,24 +783,24 @@ public class Solution {
     public long PutMarbles(int[] weights, int k) {
         if (k == 1) return 0L;
 
-        var maxHeap = new PriorityQueue<int, int>();
-        var minHeap = new PriorityQueue<int, int>(
+        var minHeap = new PriorityQueue<int, int>();
+        var maxHeap = new PriorityQueue<int, int>(
             Comparer<int>.Create((a, b) => b.CompareTo(a))
         );
 
         for (int i = 0; i < weights.Length - 1; i++) {
             int split = weights[i] + weights[i + 1];
 
-            maxHeap.Enqueue(split, split);
-            if (maxHeap.Count > k - 1) maxHeap.Dequeue();
-
             minHeap.Enqueue(split, split);
             if (minHeap.Count > k - 1) minHeap.Dequeue();
+
+            maxHeap.Enqueue(split, split);
+            if (maxHeap.Count > k - 1) maxHeap.Dequeue();
         }
 
         long maxScore = 0, minScore = 0;
-        while (maxHeap.Count > 0) maxScore += maxHeap.Dequeue();
-        while (minHeap.Count > 0) minScore += minHeap.Dequeue();
+        while (minHeap.Count > 0) maxScore += minHeap.Dequeue();
+        while (maxHeap.Count > 0) minScore += maxHeap.Dequeue();
 
         return maxScore - minScore;
     }
@@ -813,31 +813,31 @@ func putMarbles(weights []int, k int) int64 {
         return 0
     }
 
-    maxHeap := &MinHeap{}
-    minHeap := &MaxHeap{}
-    heap.Init(maxHeap)
+    minHeap := &MinHeap{}
+    maxHeap := &MaxHeap{}
     heap.Init(minHeap)
+    heap.Init(maxHeap)
 
     for i := 0; i < len(weights)-1; i++ {
         split := weights[i] + weights[i+1]
-
-        heap.Push(maxHeap, split)
-        if maxHeap.Len() > k-1 {
-            heap.Pop(maxHeap)
-        }
 
         heap.Push(minHeap, split)
         if minHeap.Len() > k-1 {
             heap.Pop(minHeap)
         }
+
+        heap.Push(maxHeap, split)
+        if maxHeap.Len() > k-1 {
+            heap.Pop(maxHeap)
+        }
     }
 
     var maxScore, minScore int64
-    for maxHeap.Len() > 0 {
-        maxScore += int64(heap.Pop(maxHeap).(int))
-    }
     for minHeap.Len() > 0 {
-        minScore += int64(heap.Pop(minHeap).(int))
+        maxScore += int64(heap.Pop(minHeap).(int))
+    }
+    for maxHeap.Len() > 0 {
+        minScore += int64(heap.Pop(maxHeap).(int))
     }
 
     return maxScore - minScore
@@ -875,23 +875,23 @@ class Solution {
     fun putMarbles(weights: IntArray, k: Int): Long {
         if (k == 1) return 0L
 
-        val maxHeap = PriorityQueue<Int>()
-        val minHeap = PriorityQueue<Int>(reverseOrder())
+        val minHeap = PriorityQueue<Int>()
+        val maxHeap = PriorityQueue<Int>(reverseOrder())
 
         for (i in 0 until weights.size - 1) {
             val split = weights[i] + weights[i + 1]
 
-            maxHeap.offer(split)
-            if (maxHeap.size > k - 1) maxHeap.poll()
-
             minHeap.offer(split)
             if (minHeap.size > k - 1) minHeap.poll()
+
+            maxHeap.offer(split)
+            if (maxHeap.size > k - 1) maxHeap.poll()
         }
 
         var maxScore = 0L
         var minScore = 0L
-        while (maxHeap.isNotEmpty()) maxScore += maxHeap.poll()
-        while (minHeap.isNotEmpty()) minScore += minHeap.poll()
+        while (minHeap.isNotEmpty()) maxScore += minHeap.poll()
+        while (maxHeap.isNotEmpty()) minScore += maxHeap.poll()
 
         return maxScore - minScore
     }
@@ -903,29 +903,29 @@ class Solution {
     func putMarbles(_ weights: [Int], _ k: Int) -> Int64 {
         if k == 1 { return 0 }
 
-        var maxHeap = [Int]()
         var minHeap = [Int]()
+        var maxHeap = [Int]()
 
         for i in 0..<(weights.count - 1) {
             let split = weights[i] + weights[i + 1]
 
-            maxHeap.append(split)
-            maxHeap.sort()
-            if maxHeap.count > k - 1 {
-                maxHeap.removeFirst()
-            }
-
             minHeap.append(split)
-            minHeap.sort(by: >)
+            minHeap.sort()
             if minHeap.count > k - 1 {
                 minHeap.removeFirst()
+            }
+
+            maxHeap.append(split)
+            maxHeap.sort(by: >)
+            if maxHeap.count > k - 1 {
+                maxHeap.removeFirst()
             }
         }
 
         var maxScore: Int64 = 0
         var minScore: Int64 = 0
-        for val in maxHeap { maxScore += Int64(val) }
-        for val in minHeap { minScore += Int64(val) }
+        for val in minHeap { maxScore += Int64(val) }
+        for val in maxHeap { minScore += Int64(val) }
 
         return maxScore - minScore
     }
@@ -940,27 +940,27 @@ impl Solution {
         }
         let k = k as usize;
 
-        let mut max_heap = BinaryHeap::new();
         let mut min_heap: BinaryHeap<Reverse<i32>> = BinaryHeap::new();
+        let mut max_heap: BinaryHeap<i32> = BinaryHeap::new();
 
         for i in 0..weights.len() - 1 {
             let split = weights[i] + weights[i + 1];
 
             // min-heap of size k-1 to keep k-1 largest
-            max_heap.push(Reverse(split));
-            if max_heap.len() > k - 1 {
-                max_heap.pop();
-            }
-
-            // max-heap of size k-1 to keep k-1 smallest
             min_heap.push(Reverse(split));
             if min_heap.len() > k - 1 {
                 min_heap.pop();
             }
+
+            // max-heap of size k-1 to keep k-1 smallest
+            max_heap.push(split);
+            if max_heap.len() > k - 1 {
+                max_heap.pop();
+            }
         }
 
-        let max_score: i64 = max_heap.iter().map(|&Reverse(x)| x as i64).sum();
-        let min_score: i64 = min_heap.iter().map(|&Reverse(x)| x as i64).sum();
+        let max_score: i64 = min_heap.iter().map(|&Reverse(x)| x as i64).sum();
+        let min_score: i64 = max_heap.iter().map(|&x| x as i64).sum();
 
         max_score - min_score
     }
