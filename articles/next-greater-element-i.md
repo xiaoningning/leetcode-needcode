@@ -229,6 +229,8 @@ impl Solution {
 - Time complexity: $O(m * n)$
 - Space complexity: $O(1)$
 
+> The output array is not counted towards space complexity, as the [standard convention](https://en.wikipedia.org/wiki/DSPACE) measures only auxiliary working space.
+
 > Where $m$ is the size of the array $nums1$ and $n$ is the size of the array $nums2$.
 
 ---

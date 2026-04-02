@@ -184,6 +184,8 @@ impl Solution {
 - Time complexity: $O(n ^ 2)$
 - Space complexity: $O(1)$
 
+> The output array is not counted towards space complexity, as the [standard convention](https://en.wikipedia.org/wiki/DSPACE) measures only auxiliary working space.
+
 ---
 
 ## 2. Suffix Max
@@ -346,6 +348,8 @@ impl Solution {
 
 - Time complexity: $O(n)$
 - Space complexity: $O(1)$
+
+> The output array is not counted towards space complexity, as the [standard convention](https://en.wikipedia.org/wiki/DSPACE) measures only auxiliary working space.
 
 ---
 

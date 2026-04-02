@@ -213,6 +213,8 @@ impl Solution {
 - Time complexity: $O(n * m)$
 - Space complexity: $O(1)$
 
+> The output array is not counted towards space complexity, as the [standard convention](https://en.wikipedia.org/wiki/DSPACE) measures only auxiliary working space.
+
 > Where $n$ and $m$ are the sizes of the arrays $spells$ and $potions$ respectively.
 
 ---
