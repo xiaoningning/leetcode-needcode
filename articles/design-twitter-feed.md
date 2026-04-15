@@ -491,10 +491,11 @@ Instead of combining **all** tweets and sorting them (which is slow), we only ne
 
 We use a **min-heap** (priority queue) because:
 
-- We push only the _latest tweet_ of each followee.
-- Each tweet has a timestamp (`count`), where smaller means more recent.
-- We repeatedly extract the most recent tweet and then push the _next_ tweet from that same user.
-- This is similar to merging K sorted lists efficiently.
+- We start by pushing the latest tweet from each followee.
+- Smaller `count` means the tweet is more recent.
+- When we pop a tweet, we push the next older tweet from that same user.
+- We repeat this until we collect `10` tweets.
+- One user can still contribute many tweets if they are the most recent.
 
 This ensures:
 
@@ -518,6 +519,7 @@ This ensures:
     - For each followee:
         - Push their most recent tweet into a min-heap:
           `[time, tweetId, followeeId, nextIndex]`
+        - This is only the starting state of the merge, not the final candidate set.
     - While heap is not empty and result has < `10` tweets:
         - Pop the most recent tweet
         - Add tweetId to the result
@@ -1171,8 +1173,9 @@ The trick:
 
 - When a user posts a tweet, append it with a decreasing timestamp (`count`) and keep only the last `10` tweets.
 - When getting the news feed:
-    - If the user follows many people (>= `10`), we first gather only the recent tweets that _could_ appear in the final `10`, using a max-heap limited to size `10`.
-    - Otherwise, push the most recent tweet of each followee directly into a min-heap and expand like a K-sorted-list merge.
+    - If the user follows many people (>= `10`), keep only the `10` followees with the newest latest tweet by using a max-heap of size `10`.
+    - This is safe: if a followee's newest tweet is already too old, none of their older tweets can make the final `10`.
+    - Otherwise, push the latest tweet from each followee into a min-heap and keep expanding from the same user after each pop.
 - In both cases, we never process more than **`10` tweets per followee**, and never extract more than **`10` results**.
 
 This makes the method very fast even when users post a lot of tweets.
@@ -1188,8 +1191,9 @@ This makes the method very fast even when users post a lot of tweets.
    Steps:
     - Ensure user follows themselves.
     - If followees >= `10`:
-        - Build a **max-heap** that stores only the top `10` most recent tweets across followees.
-        - Convert it to a **min-heap** for final processing.
+        - Build a **max-heap** that keeps only the `10` newest latest tweets from followees.
+        - Move them into a **min-heap** for final processing.
+        - After popping a tweet, push the next older tweet from that same followee.
     - Else:
         - Push the newest tweet from each followee into a min-heap.
     - Repeatedly pop from the heap:
