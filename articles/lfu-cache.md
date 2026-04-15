@@ -573,11 +573,11 @@ impl LFUCache {
 
 ### Intuition
 
-To achieve O(1) operations, we need fast access to both the least frequent element and the least recently used element within each frequency group. We use a hash map from frequency to a doubly linked list. Each linked list maintains insertion order, so the head is the least recently used. We also track the current minimum frequency to quickly find which list to evict from.
+To achieve O(1) operations, we need fast access to a key's current node and to the least recently used node inside each frequency group. We use a hash map from frequency to a doubly linked list of cache nodes, and a separate key-to-node map for direct access. Each linked list maintains recency order within one frequency bucket, so the head is the eviction candidate for ties. We also track the current minimum frequency to quickly find which list to evict from.
 
 ### Algorithm
 
-1. Maintain three maps: `valMap` (key to value), `countMap` (key to frequency), and `listMap` (frequency to doubly linked list of keys).
+1. Maintain a `nodeMap` (or equivalent key-to-node lookup) and a `listMap` (frequency to doubly linked list of nodes).
 2. Track `lfuCount`, the current minimum frequency in the cache.
 3. For `get(key)`: if the key exists, move it from its current frequency list to the next frequency list, update the frequency, and adjust `lfuCount` if needed.
 4. For `put(key, value)`: if the key exists, update its value and treat it like a `get` operation. If inserting a new key and at capacity, pop the leftmost (oldest) element from the `lfuCount` list.
@@ -588,180 +588,181 @@ To achieve O(1) operations, we need fast access to both the least frequent eleme
 ```python
 class ListNode:
 
-    def __init__(self, val, prev=None, next=None):
+    def __init__(self, key, val):
+        self.key = key
         self.val = val
-        self.prev = prev
-        self.next = next
+        self.freq = 1
+        self.prev = None
+        self.next = None
 
 class LinkedList:
 
     def __init__(self):
-        self.left = ListNode(0)
-        self.right = ListNode(0, self.left)
+        self.left = ListNode(0, 0)
+        self.right = ListNode(0, 0)
         self.left.next = self.right
-        self.map = {}
+        self.right.prev = self.left
+        self.size = 0
 
     def length(self):
-        return len(self.map)
+        return self.size
 
-    def pushRight(self, val):
-        node = ListNode(val, self.right.prev, self.right)
-        self.map[val] = node
+    def pushRight(self, node):
+        prev = self.right.prev
+        prev.next = node
+        node.prev = prev
+        node.next = self.right
         self.right.prev = node
-        node.prev.next = node
+        self.size += 1
 
-    def pop(self, val):
-        if val in self.map:
-            node = self.map[val]
-            next, prev = node.next, node.prev
-            next.prev = prev
-            prev.next = next
-            self.map.pop(val, None)
+    def pop(self, node):
+        prev, next = node.prev, node.next
+        prev.next = next
+        next.prev = prev
+        node.prev = None
+        node.next = None
+        self.size -= 1
 
     def popLeft(self):
-        res = self.left.next.val
-        self.pop(self.left.next.val)
-        return res
-
-    def update(self, val):
-        self.pop(val)
-        self.pushRight(val)
+        if self.length() == 0:
+            return None
+        node = self.left.next
+        self.pop(node)
+        return node
 
 class LFUCache:
 
     def __init__(self, capacity: int):
         self.cap = capacity
         self.lfuCnt = 0
-        self.valMap = {} # Map key -> val
-        self.countMap = defaultdict(int) # Map key -> count
-        # Map count of key -> linkedlist
+        self.nodeMap = {} # Map key -> node
+        # Map frequency -> linkedlist of nodes
         self.listMap = defaultdict(LinkedList)
 
-    def counter(self, key):
-        cnt = self.countMap[key]
-        self.countMap[key] += 1
-        self.listMap[cnt].pop(key)
-        self.listMap[cnt + 1].pushRight(key)
+    def counter(self, node):
+        cnt = node.freq
+        self.listMap[cnt].pop(node)
 
         if cnt == self.lfuCnt and self.listMap[cnt].length() == 0:
             self.lfuCnt += 1
 
+        node.freq += 1
+        self.listMap[node.freq].pushRight(node)
+
 
     def get(self, key: int) -> int:
-        if key not in self.valMap:
+        if key not in self.nodeMap:
             return -1
-        self.counter(key)
-        return self.valMap[key]
+        node = self.nodeMap[key]
+        self.counter(node)
+        return node.val
 
     def put(self, key: int, value: int) -> None:
         if self.cap == 0:
             return
 
-        if key not in self.valMap and len(self.valMap) == self.cap:
-            res = self.listMap[self.lfuCnt].popLeft()
-            self.valMap.pop(res)
-            self.countMap.pop(res)
+        if key in self.nodeMap:
+            node = self.nodeMap[key]
+            node.val = value
+            self.counter(node)
+            return
 
-        self.valMap[key] = value
-        self.counter(key)
-        self.lfuCnt = min(self.lfuCnt, self.countMap[key])
+        if len(self.nodeMap) == self.cap:
+            node = self.listMap[self.lfuCnt].popLeft()
+            self.nodeMap.pop(node.key)
+
+        node = ListNode(key, value)
+        self.nodeMap[key] = node
+        self.listMap[1].pushRight(node)
+        self.lfuCnt = 1
 ```
 
 ```java
 class ListNode {
-    int val;
+    int key, val, freq;
     ListNode prev, next;
 
-    ListNode(int val) {
+    ListNode(int key, int val) {
+        this.key = key;
         this.val = val;
-    }
-
-    ListNode(int val, ListNode prev, ListNode next) {
-        this.val = val;
-        this.prev = prev;
-        this.next = next;
+        this.freq = 1;
     }
 }
 
 class DoublyLinkedList {
     private ListNode left, right;
-    private Map<Integer, ListNode> map;
+    private int size;
 
     DoublyLinkedList() {
-        this.left = new ListNode(0);
-        this.right = new ListNode(0, this.left, null);
+        this.left = new ListNode(0, 0);
+        this.right = new ListNode(0, 0);
         this.left.next = this.right;
-        this.map = new HashMap<>();
+        this.right.prev = this.left;
+        this.size = 0;
     }
 
     public int length() {
-        return map.size();
+        return size;
     }
 
-    public void pushRight(int val) {
-        ListNode node = new ListNode(val, this.right.prev, this.right);
-        this.map.put(val, node);
-        this.right.prev.next = node;
+    public void pushRight(ListNode node) {
+        ListNode prev = this.right.prev;
+        prev.next = node;
+        node.prev = prev;
+        node.next = this.right;
         this.right.prev = node;
+        size++;
     }
 
-    public void pop(int val) {
-        if (this.map.containsKey(val)) {
-            ListNode node = this.map.get(val);
-            ListNode prev = node.prev, next = node.next;
-            prev.next = next;
-            next.prev = prev;
-            this.map.remove(val);
-        }
+    public void pop(ListNode node) {
+        ListNode prev = node.prev, next = node.next;
+        prev.next = next;
+        next.prev = prev;
+        node.prev = null;
+        node.next = null;
+        size--;
     }
 
-    public int popLeft() {
-        int res = this.left.next.val;
-        pop(res);
-        return res;
-    }
-
-    public void update(int val) {
-        pop(val);
-        pushRight(val);
+    public ListNode popLeft() {
+        ListNode node = this.left.next;
+        pop(node);
+        return node;
     }
 }
 
 public class LFUCache {
     private int capacity;
     private int lfuCount;
-    private Map<Integer, Integer> valMap;
-    private Map<Integer, Integer> countMap;
+    private Map<Integer, ListNode> nodeMap;
     private Map<Integer, DoublyLinkedList> listMap;
 
     public LFUCache(int capacity) {
         this.capacity = capacity;
         this.lfuCount = 0;
-        this.valMap = new HashMap<>();
-        this.countMap = new HashMap<>();
+        this.nodeMap = new HashMap<>();
         this.listMap = new HashMap<>();
     }
 
-    private void counter(int key) {
-        int count = countMap.get(key);
-        countMap.put(key, count + 1);
-        listMap.putIfAbsent(count, new DoublyLinkedList());
-        listMap.get(count).pop(key);
-
-        listMap.putIfAbsent(count + 1, new DoublyLinkedList());
-        listMap.get(count + 1).pushRight(key);
+    private void counter(ListNode node) {
+        int count = node.freq;
+        listMap.get(count).pop(node);
 
         if (count == lfuCount && listMap.get(count).length() == 0) {
             lfuCount++;
         }
+
+        node.freq++;
+        listMap.putIfAbsent(node.freq, new DoublyLinkedList());
+        listMap.get(node.freq).pushRight(node);
     }
 
     public int get(int key) {
-        if (!valMap.containsKey(key)) {
+        if (!nodeMap.containsKey(key)) {
             return -1;
         }
-        counter(key);
-        return valMap.get(key);
+        ListNode node = nodeMap.get(key);
+        counter(node);
+        return node.val;
     }
 
     public void put(int key, int value) {
@@ -769,16 +770,23 @@ public class LFUCache {
             return;
         }
 
-        if (!valMap.containsKey(key) && valMap.size() == capacity) {
-            int toRemove = listMap.get(lfuCount).popLeft();
-            valMap.remove(toRemove);
-            countMap.remove(toRemove);
+        if (nodeMap.containsKey(key)) {
+            ListNode node = nodeMap.get(key);
+            node.val = value;
+            counter(node);
+            return;
         }
 
-        valMap.put(key, value);
-        countMap.putIfAbsent(key, 0);
-        counter(key);
-        lfuCount = Math.min(lfuCount, countMap.get(key));
+        if (nodeMap.size() == capacity) {
+            ListNode toRemove = listMap.get(lfuCount).popLeft();
+            nodeMap.remove(toRemove.key);
+        }
+
+        ListNode node = new ListNode(key, value);
+        nodeMap.put(key, node);
+        listMap.putIfAbsent(1, new DoublyLinkedList());
+        listMap.get(1).pushRight(node);
+        lfuCount = 1;
     }
 }
 ```
@@ -786,110 +794,102 @@ public class LFUCache {
 ```cpp
 class LFUCache {
     struct ListNode {
+        int key;
         int val;
+        int freq;
         ListNode* prev;
         ListNode* next;
 
-        ListNode(int val) : val(val), prev(nullptr), next(nullptr) {}
-        ListNode(int val, ListNode* prev, ListNode* next) : val(val), prev(prev), next(next) {}
+        ListNode(int key, int val) : key(key), val(val), freq(1), prev(nullptr), next(nullptr) {}
     };
 
     struct LinkedList {
         ListNode* left;
         ListNode* right;
-        unordered_map<int, ListNode*> map;
+        int size;
 
         LinkedList() {
-            left = new ListNode(0);
-            right = new ListNode(0);
+            left = new ListNode(0, 0);
+            right = new ListNode(0, 0);
             left->next = right;
             right->prev = left;
+            size = 0;
         }
 
         ~LinkedList() {
-            while (left->next != right) {
-                ListNode* temp = left->next;
-                left->next = temp->next;
-                delete temp;
-            }
             delete left;
             delete right;
         }
 
         int length() {
-            return map.size();
+            return size;
         }
 
-        void pushRight(int val) {
-            ListNode* node = new ListNode(val, right->prev, right);
-            map[val] = node;
-            right->prev->next = node;
+        void pushRight(ListNode* node) {
+            ListNode* prev = right->prev;
+            prev->next = node;
+            node->prev = prev;
+            node->next = right;
             right->prev = node;
+            size++;
         }
 
-        void pop(int val) {
-            if (map.find(val) != map.end()) {
-                ListNode* node = map[val];
-                ListNode* prev = node->prev;
-                ListNode* next = node->next;
-                prev->next = next;
-                next->prev = prev;
-                map.erase(val);
-                delete node;
-            }
+        void pop(ListNode* node) {
+            ListNode* prev = node->prev;
+            ListNode* next = node->next;
+            prev->next = next;
+            next->prev = prev;
+            node->prev = nullptr;
+            node->next = nullptr;
+            size--;
         }
 
-        int popLeft() {
-            int res = left->next->val;
-            pop(res);
-            return res;
-        }
-
-        void update(int val) {
-            pop(val);
-            pushRight(val);
+        ListNode* popLeft() {
+            ListNode* node = left->next;
+            pop(node);
+            return node;
         }
     };
 
     int capacity;
     int lfuCount;
-    unordered_map<int, int> valMap; // Map key -> value
-    unordered_map<int, int> countMap; // Map key -> count
-    unordered_map<int, LinkedList*> listMap; // Map count -> linked list
+    unordered_map<int, ListNode*> nodeMap; // Map key -> node
+    unordered_map<int, LinkedList*> listMap; // Map frequency -> linked list
 
-    void counter(int key) {
-        int count = countMap[key];
-        countMap[key] = count + 1;
-
-        listMap[count]->pop(key);
-
-        if (!listMap.count(count + 1)) {
-            listMap[count + 1] = new LinkedList();
-        }
-        listMap[count + 1]->pushRight(key);
+    void counter(ListNode* node) {
+        int count = node->freq;
+        listMap[count]->pop(node);
 
         if (count == lfuCount && listMap[count]->length() == 0) {
             lfuCount++;
         }
+
+        node->freq++;
+        if (!listMap.count(node->freq)) {
+            listMap[node->freq] = new LinkedList();
+        }
+        listMap[node->freq]->pushRight(node);
     }
 
 public:
-    LFUCache(int capacity) : capacity(capacity), lfuCount(0) {
-        listMap[0] = new LinkedList();
-    }
+    LFUCache(int capacity) : capacity(capacity), lfuCount(0) {}
 
     ~LFUCache() {
+        for (auto& pair : nodeMap) {
+            delete pair.second;
+        }
         for (auto& pair : listMap) {
             delete pair.second;
         }
     }
 
     int get(int key) {
-        if (valMap.find(key) == valMap.end()) {
+        if (nodeMap.find(key) == nodeMap.end()) {
             return -1;
         }
-        counter(key);
-        return valMap[key];
+        ListNode* node = nodeMap[key];
+        counter(node);
+        return node->val;
     }
 
     void put(int key, int value) {
@@ -897,19 +897,26 @@ public:
             return;
         }
 
-        if (valMap.find(key) == valMap.end() && valMap.size() == capacity) {
-            int toRemove = listMap[lfuCount]->popLeft();
-            valMap.erase(toRemove);
-            countMap.erase(toRemove);
+        if (nodeMap.find(key) != nodeMap.end()) {
+            ListNode* node = nodeMap[key];
+            node->val = value;
+            counter(node);
+            return;
         }
 
-        valMap[key] = value;
-        if (countMap.find(key) == countMap.end()) {
-            countMap[key] = 0;
-            listMap[0]->pushRight(key);
-            lfuCount = 0;
+        if (nodeMap.size() == capacity) {
+            ListNode* toRemove = listMap[lfuCount]->popLeft();
+            nodeMap.erase(toRemove->key);
+            delete toRemove;
         }
-        counter(key);
+
+        ListNode* node = new ListNode(key, value);
+        nodeMap[key] = node;
+        if (!listMap.count(1)) {
+            listMap[1] = new LinkedList();
+        }
+        listMap[1]->pushRight(node);
+        lfuCount = 1;
     }
 };
 ```
@@ -917,72 +924,66 @@ public:
 ```javascript
 class ListNode {
     /**
+     * @param {number} key
      * @param {number} val
-     * @param {ListNode} prev
-     * @param {ListNode} next
      */
-    constructor(val, prev = null, next = null) {
+    constructor(key, val) {
+        this.key = key;
         this.val = val;
-        this.prev = prev;
-        this.next = next;
+        this.freq = 1;
+        this.prev = null;
+        this.next = null;
     }
 }
 
 class LinkedList {
     constructor() {
-        this.left = new ListNode(0);
-        this.right = new ListNode(0);
+        this.left = new ListNode(0, 0);
+        this.right = new ListNode(0, 0);
         this.left.next = this.right;
         this.right.prev = this.left;
-        this.map = new Map();
+        this.size = 0;
     }
 
     /**
      * @return {number}
      */
     length() {
-        return this.map.size;
+        return this.size;
     }
 
     /**
-     * @param {number} val
+     * @param {ListNode} node
      */
-    pushRight(val) {
-        const node = new ListNode(val, this.right.prev, this.right);
-        this.map.set(val, node);
-        this.right.prev.next = node;
+    pushRight(node) {
+        const prev = this.right.prev;
+        prev.next = node;
+        node.prev = prev;
+        node.next = this.right;
         this.right.prev = node;
+        this.size++;
     }
 
     /**
-     * @param {number} val
+     * @param {ListNode} node
      */
-    pop(val) {
-        if (this.map.has(val)) {
-            const node = this.map.get(val);
-            const prev = node.prev;
-            const next = node.next;
-            prev.next = next;
-            next.prev = prev;
-            this.map.delete(val);
-        }
+    pop(node) {
+        const prev = node.prev;
+        const next = node.next;
+        prev.next = next;
+        next.prev = prev;
+        node.prev = null;
+        node.next = null;
+        this.size--;
     }
 
     /**
-     * @return {number}
+     * @return {ListNode}
      */
     popLeft() {
-        const res = this.left.next.val;
-        this.pop(res);
-        return res;
-    }
-
-    /**
-     * @param {number} val
-     */
-    update(val) {
-        this.pop(val);
-        this.pushRight(val);
+        const node = this.left.next;
+        this.pop(node);
+        return node;
     }
 }
 
@@ -993,29 +994,26 @@ class LFUCache {
     constructor(capacity) {
         this.capacity = capacity;
         this.lfuCount = 0;
-        this.valMap = new Map();
-        this.countMap = new Map();
+        this.nodeMap = new Map();
         this.listMap = new Map();
-        this.listMap.set(0, new LinkedList());
     }
 
     /**
-     * @param {number} key
+     * @param {ListNode} node
      */
-    counter(key) {
-        const count = this.countMap.get(key);
-        this.countMap.set(key, count + 1);
-
-        this.listMap.get(count).pop(key);
-
-        if (!this.listMap.has(count + 1)) {
-            this.listMap.set(count + 1, new LinkedList());
-        }
-        this.listMap.get(count + 1).pushRight(key);
+    counter(node) {
+        const count = node.freq;
+        this.listMap.get(count).pop(node);
 
         if (count === this.lfuCount && this.listMap.get(count).length() === 0) {
             this.lfuCount++;
         }
+
+        node.freq++;
+        if (!this.listMap.has(node.freq)) {
+            this.listMap.set(node.freq, new LinkedList());
+        }
+        this.listMap.get(node.freq).pushRight(node);
     }
 
     /**
@@ -1023,11 +1021,12 @@ class LFUCache {
      * @return {number}
      */
     get(key) {
-        if (!this.valMap.has(key)) {
+        if (!this.nodeMap.has(key)) {
             return -1;
         }
-        this.counter(key);
-        return this.valMap.get(key);
+        const node = this.nodeMap.get(key);
+        this.counter(node);
+        return node.val;
     }
 
     /**
@@ -1037,143 +1036,153 @@ class LFUCache {
     put(key, value) {
         if (this.capacity === 0) return;
 
-        if (!this.valMap.has(key) && this.valMap.size === this.capacity) {
-            const toRemove = this.listMap.get(this.lfuCount).popLeft();
-            this.valMap.delete(toRemove);
-            this.countMap.delete(toRemove);
+        if (this.nodeMap.has(key)) {
+            const node = this.nodeMap.get(key);
+            node.val = value;
+            this.counter(node);
+            return;
         }
 
-        this.valMap.set(key, value);
-        if (!this.countMap.has(key)) {
-            this.countMap.set(key, 0);
-            this.listMap.get(0).pushRight(key);
-            this.lfuCount = 0;
+        if (this.nodeMap.size === this.capacity) {
+            const toRemove = this.listMap.get(this.lfuCount).popLeft();
+            this.nodeMap.delete(toRemove.key);
         }
-        this.counter(key);
+
+        const node = new ListNode(key, value);
+        this.nodeMap.set(key, node);
+        if (!this.listMap.has(1)) {
+            this.listMap.set(1, new LinkedList());
+        }
+        this.listMap.get(1).pushRight(node);
+        this.lfuCount = 1;
     }
 }
 ```
 
 ```csharp
 public class ListNode {
+    public int Key;
     public int Val;
+    public int Freq;
     public ListNode Prev, Next;
 
-    public ListNode(int val) {
+    public ListNode(int key, int val) {
+        Key = key;
         Val = val;
-    }
-
-    public ListNode(int val, ListNode prev, ListNode next) {
-        Val = val;
-        Prev = prev;
-        Next = next;
+        Freq = 1;
     }
 }
 
 public class DoublyLinkedList {
     private ListNode left, right;
-    private Dictionary<int, ListNode> map;
+    private int size;
 
     public DoublyLinkedList() {
-        left = new ListNode(0);
-        right = new ListNode(0, left, null);
+        left = new ListNode(0, 0);
+        right = new ListNode(0, 0);
         left.Next = right;
-        map = new Dictionary<int, ListNode>();
+        right.Prev = left;
+        size = 0;
     }
 
     public int Length() {
-        return map.Count;
+        return size;
     }
 
-    public void PushRight(int val) {
-        var node = new ListNode(val, right.Prev, right);
-        map[val] = node;
-        right.Prev.Next = node;
+    public void PushRight(ListNode node) {
+        var prev = right.Prev;
+        prev.Next = node;
+        node.Prev = prev;
+        node.Next = right;
         right.Prev = node;
+        size++;
     }
 
-    public void Pop(int val) {
-        if (map.ContainsKey(val)) {
-            var node = map[val];
-            var prev = node.Prev;
-            var next = node.Next;
-            prev.Next = next;
-            next.Prev = prev;
-            map.Remove(val);
-        }
+    public void Pop(ListNode node) {
+        var prev = node.Prev;
+        var next = node.Next;
+        prev.Next = next;
+        next.Prev = prev;
+        node.Prev = null;
+        node.Next = null;
+        size--;
     }
 
-    public int PopLeft() {
-        int res = left.Next.Val;
-        Pop(res);
-        return res;
+    public ListNode PopLeft() {
+        var node = left.Next;
+        Pop(node);
+        return node;
     }
 }
 
 public class LFUCache {
     private int capacity;
     private int lfuCount;
-    private Dictionary<int, int> valMap;
-    private Dictionary<int, int> countMap;
+    private Dictionary<int, ListNode> nodeMap;
     private Dictionary<int, DoublyLinkedList> listMap;
 
     public LFUCache(int capacity) {
         this.capacity = capacity;
         lfuCount = 0;
-        valMap = new Dictionary<int, int>();
-        countMap = new Dictionary<int, int>();
+        nodeMap = new Dictionary<int, ListNode>();
         listMap = new Dictionary<int, DoublyLinkedList>();
     }
 
-    private void Counter(int key) {
-        int count = countMap[key];
-        countMap[key] = count + 1;
-
-        if (!listMap.ContainsKey(count)) {
-            listMap[count] = new DoublyLinkedList();
-        }
-        listMap[count].Pop(key);
-
-        if (!listMap.ContainsKey(count + 1)) {
-            listMap[count + 1] = new DoublyLinkedList();
-        }
-        listMap[count + 1].PushRight(key);
+    private void Counter(ListNode node) {
+        int count = node.Freq;
+        listMap[count].Pop(node);
 
         if (count == lfuCount && listMap[count].Length() == 0) {
             lfuCount++;
         }
+
+        node.Freq++;
+        if (!listMap.ContainsKey(node.Freq)) {
+            listMap[node.Freq] = new DoublyLinkedList();
+        }
+        listMap[node.Freq].PushRight(node);
     }
 
     public int Get(int key) {
-        if (!valMap.ContainsKey(key)) {
+        if (!nodeMap.ContainsKey(key)) {
             return -1;
         }
-        Counter(key);
-        return valMap[key];
+        var node = nodeMap[key];
+        Counter(node);
+        return node.Val;
     }
 
     public void Put(int key, int value) {
         if (capacity == 0) return;
 
-        if (!valMap.ContainsKey(key) && valMap.Count == capacity) {
-            int toRemove = listMap[lfuCount].PopLeft();
-            valMap.Remove(toRemove);
-            countMap.Remove(toRemove);
+        if (nodeMap.ContainsKey(key)) {
+            var node = nodeMap[key];
+            node.Val = value;
+            Counter(node);
+            return;
         }
 
-        valMap[key] = value;
-        if (!countMap.ContainsKey(key)) {
-            countMap[key] = 0;
+        if (nodeMap.Count == capacity) {
+            var toRemove = listMap[lfuCount].PopLeft();
+            nodeMap.Remove(toRemove.Key);
         }
-        Counter(key);
-        lfuCount = Math.Min(lfuCount, countMap[key]);
+
+        var newNode = new ListNode(key, value);
+        nodeMap[key] = newNode;
+        if (!listMap.ContainsKey(1)) {
+            listMap[1] = new DoublyLinkedList();
+        }
+        listMap[1].PushRight(newNode);
+        lfuCount = 1;
     }
 }
 ```
 
 ```go
 type ListNode struct {
+    key  int
     val  int
+    freq int
     prev *ListNode
     next *ListNode
 }
@@ -1181,91 +1190,86 @@ type ListNode struct {
 type LinkedList struct {
     left  *ListNode
     right *ListNode
-    mp    map[int]*ListNode
+    size  int
 }
 
 func NewLinkedList() *LinkedList {
-    left := &ListNode{val: 0}
-    right := &ListNode{val: 0, prev: left}
+    left := &ListNode{}
+    right := &ListNode{}
     left.next = right
+    right.prev = left
     return &LinkedList{
         left:  left,
         right: right,
-        mp:    make(map[int]*ListNode),
     }
 }
 
 func (ll *LinkedList) length() int {
-    return len(ll.mp)
+    return ll.size
 }
 
-func (ll *LinkedList) pushRight(val int) {
-    node := &ListNode{val: val, prev: ll.right.prev, next: ll.right}
-    ll.mp[val] = node
-    ll.right.prev.next = node
+func (ll *LinkedList) pushRight(node *ListNode) {
+    prev := ll.right.prev
+    prev.next = node
+    node.prev = prev
+    node.next = ll.right
     ll.right.prev = node
+    ll.size++
 }
 
-func (ll *LinkedList) pop(val int) {
-    if node, exists := ll.mp[val]; exists {
-        prev, next := node.prev, node.next
-        prev.next = next
-        next.prev = prev
-        delete(ll.mp, val)
-    }
+func (ll *LinkedList) pop(node *ListNode) {
+    prev, next := node.prev, node.next
+    prev.next = next
+    next.prev = prev
+    node.prev = nil
+    node.next = nil
+    ll.size--
 }
 
-func (ll *LinkedList) popLeft() int {
-    res := ll.left.next.val
-    ll.pop(res)
-    return res
+func (ll *LinkedList) popLeft() *ListNode {
+    node := ll.left.next
+    ll.pop(node)
+    return node
 }
 
 type LFUCache struct {
     capacity int
     lfuCount int
-    valMap   map[int]int
-    countMap map[int]int
+    nodeMap  map[int]*ListNode
     listMap  map[int]*LinkedList
 }
 
 func Constructor(capacity int) LFUCache {
-    listMap := make(map[int]*LinkedList)
-    listMap[0] = NewLinkedList()
     return LFUCache{
         capacity: capacity,
         lfuCount: 0,
-        valMap:   make(map[int]int),
-        countMap: make(map[int]int),
-        listMap:  listMap,
+        nodeMap:  make(map[int]*ListNode),
+        listMap:  make(map[int]*LinkedList),
     }
 }
 
-func (this *LFUCache) counter(key int) {
-    count := this.countMap[key]
-    this.countMap[key] = count + 1
-
-    if _, exists := this.listMap[count]; !exists {
-        this.listMap[count] = NewLinkedList()
-    }
-    this.listMap[count].pop(key)
-
-    if _, exists := this.listMap[count+1]; !exists {
-        this.listMap[count+1] = NewLinkedList()
-    }
-    this.listMap[count+1].pushRight(key)
+func (this *LFUCache) counter(node *ListNode) {
+    count := node.freq
+    this.listMap[count].pop(node)
 
     if count == this.lfuCount && this.listMap[count].length() == 0 {
         this.lfuCount++
     }
+
+    node.freq++
+    if _, exists := this.listMap[node.freq]; !exists {
+        this.listMap[node.freq] = NewLinkedList()
+    }
+    this.listMap[node.freq].pushRight(node)
 }
 
 func (this *LFUCache) Get(key int) int {
-    if _, exists := this.valMap[key]; !exists {
+    node, exists := this.nodeMap[key]
+    if !exists {
         return -1
     }
-    this.counter(key)
-    return this.valMap[key]
+    this.counter(node)
+    return node.val
 }
 
 func (this *LFUCache) Put(key int, value int) {
@@ -1273,331 +1277,351 @@ func (this *LFUCache) Put(key int, value int) {
         return
     }
 
-    if _, exists := this.valMap[key]; !exists && len(this.valMap) == this.capacity {
-        toRemove := this.listMap[this.lfuCount].popLeft()
-        delete(this.valMap, toRemove)
-        delete(this.countMap, toRemove)
+    if node, exists := this.nodeMap[key]; exists {
+        node.val = value
+        this.counter(node)
+        return
     }
 
-    this.valMap[key] = value
-    if _, exists := this.countMap[key]; !exists {
-        this.countMap[key] = 0
-        this.listMap[0].pushRight(key)
-        this.lfuCount = 0
+    if len(this.nodeMap) == this.capacity {
+        toRemove := this.listMap[this.lfuCount].popLeft()
+        delete(this.nodeMap, toRemove.key)
     }
-    this.counter(key)
+
+    node := &ListNode{key: key, val: value, freq: 1}
+    this.nodeMap[key] = node
+    if _, exists := this.listMap[1]; !exists {
+        this.listMap[1] = NewLinkedList()
+    }
+    this.listMap[1].pushRight(node)
+    this.lfuCount = 1
 }
 ```
 
 ```kotlin
-class ListNode(var `val`: Int) {
+class ListNode(val key: Int, var value: Int) {
+    var freq = 1
     var prev: ListNode? = null
     var next: ListNode? = null
-
-    constructor(`val`: Int, prev: ListNode?, next: ListNode?) : this(`val`) {
-        this.prev = prev
-        this.next = next
-    }
 }
 
 class DoublyLinkedList {
-    private val left = ListNode(0)
-    private val right = ListNode(0, left, null)
-    private val map = HashMap<Int, ListNode>()
+    private val left = ListNode(0, 0)
+    private val right = ListNode(0, 0)
+    private var size = 0
 
     init {
         left.next = right
+        right.prev = left
     }
 
-    fun length(): Int = map.size
+    fun length(): Int = size
 
-    fun pushRight(`val`: Int) {
-        val node = ListNode(`val`, right.prev, right)
-        map[`val`] = node
-        right.prev?.next = node
+    fun pushRight(node: ListNode) {
+        val prev = right.prev
+        prev?.next = node
+        node.prev = prev
+        node.next = right
         right.prev = node
+        size++
     }
 
-    fun pop(`val`: Int) {
-        map[`val`]?.let { node ->
-            val prev = node.prev
-            val next = node.next
-            prev?.next = next
-            next?.prev = prev
-            map.remove(`val`)
-        }
+    fun pop(node: ListNode) {
+        val prev = node.prev
+        val next = node.next
+        prev?.next = next
+        next?.prev = prev
+        node.prev = null
+        node.next = null
+        size--
     }
 
-    fun popLeft(): Int {
-        val res = left.next!!.`val`
-        pop(res)
-        return res
+    fun popLeft(): ListNode {
+        val node = left.next!!
+        pop(node)
+        return node
     }
 }
 
 class LFUCache(private val capacity: Int) {
     private var lfuCount = 0
-    private val valMap = HashMap<Int, Int>()
-    private val countMap = HashMap<Int, Int>()
+    private val nodeMap = HashMap<Int, ListNode>()
     private val listMap = HashMap<Int, DoublyLinkedList>()
 
-    init {
-        listMap[0] = DoublyLinkedList()
-    }
-
-    private fun counter(key: Int) {
-        val count = countMap[key]!!
-        countMap[key] = count + 1
-
-        listMap.getOrPut(count) { DoublyLinkedList() }.pop(key)
-        listMap.getOrPut(count + 1) { DoublyLinkedList() }.pushRight(key)
+    private fun counter(node: ListNode) {
+        val count = node.freq
+        listMap[count]!!.pop(node)
 
         if (count == lfuCount && listMap[count]!!.length() == 0) {
             lfuCount++
         }
+
+        node.freq++
+        listMap.getOrPut(node.freq) { DoublyLinkedList() }.pushRight(node)
     }
 
     fun get(key: Int): Int {
-        if (!valMap.containsKey(key)) {
-            return -1
-        }
-        counter(key)
-        return valMap[key]!!
+        val node = nodeMap[key] ?: return -1
+        counter(node)
+        return node.value
     }
 
     fun put(key: Int, value: Int) {
         if (capacity == 0) return
 
-        if (!valMap.containsKey(key) && valMap.size == capacity) {
-            val toRemove = listMap[lfuCount]!!.popLeft()
-            valMap.remove(toRemove)
-            countMap.remove(toRemove)
+        if (nodeMap.containsKey(key)) {
+            val node = nodeMap[key]!!
+            node.value = value
+            counter(node)
+            return
         }
 
-        valMap[key] = value
-        if (!countMap.containsKey(key)) {
-            countMap[key] = 0
-            listMap[0]!!.pushRight(key)
-            lfuCount = 0
+        if (nodeMap.size == capacity) {
+            val toRemove = listMap[lfuCount]!!.popLeft()
+            nodeMap.remove(toRemove.key)
         }
-        counter(key)
+
+        val node = ListNode(key, value)
+        nodeMap[key] = node
+        listMap.getOrPut(1) { DoublyLinkedList() }.pushRight(node)
+        lfuCount = 1
     }
 }
 ```
 
 ```swift
 class ListNode {
+    var key: Int
     var val: Int
+    var freq: Int
     var prev: ListNode?
     var next: ListNode?
 
-    init(_ val: Int, _ prev: ListNode? = nil, _ next: ListNode? = nil) {
+    init(_ key: Int, _ val: Int) {
+        self.key = key
         self.val = val
-        self.prev = prev
-        self.next = next
+        self.freq = 1
     }
 }
 
 class LinkedList {
     private var left: ListNode
     private var right: ListNode
-    private var map: [Int: ListNode]
+    private var size: Int
 
     init() {
-        left = ListNode(0)
-        right = ListNode(0, left, nil)
+        left = ListNode(0, 0)
+        right = ListNode(0, 0)
         left.next = right
-        map = [:]
+        right.prev = left
+        size = 0
     }
 
     func length() -> Int {
-        return map.count
+        return size
     }
 
-    func pushRight(_ val: Int) {
-        let node = ListNode(val, right.prev, right)
-        map[val] = node
-        right.prev?.next = node
+    func pushRight(_ node: ListNode) {
+        let prev = right.prev
+        prev?.next = node
+        node.prev = prev
+        node.next = right
         right.prev = node
+        size += 1
     }
 
-    func pop(_ val: Int) {
-        if let node = map[val] {
-            let prev = node.prev
-            let next = node.next
-            prev?.next = next
-            next?.prev = prev
-            map.removeValue(forKey: val)
-        }
+    func pop(_ node: ListNode) {
+        let prev = node.prev
+        let next = node.next
+        prev?.next = next
+        next?.prev = prev
+        node.prev = nil
+        node.next = nil
+        size -= 1
     }
 
-    func popLeft() -> Int {
-        let res = left.next!.val
-        pop(res)
-        return res
+    func popLeft() -> ListNode {
+        let node = left.next!
+        pop(node)
+        return node
     }
 }
 
 class LFUCache {
     private var capacity: Int
     private var lfuCount: Int
-    private var valMap: [Int: Int]
-    private var countMap: [Int: Int]
+    private var nodeMap: [Int: ListNode]
     private var listMap: [Int: LinkedList]
 
     init(_ capacity: Int) {
         self.capacity = capacity
         self.lfuCount = 0
-        self.valMap = [:]
-        self.countMap = [:]
-        self.listMap = [0: LinkedList()]
+        self.nodeMap = [:]
+        self.listMap = [:]
     }
 
-    private func counter(_ key: Int) {
-        let count = countMap[key]!
-        countMap[key] = count + 1
-
-        if listMap[count] == nil {
-            listMap[count] = LinkedList()
-        }
-        listMap[count]!.pop(key)
-
-        if listMap[count + 1] == nil {
-            listMap[count + 1] = LinkedList()
-        }
-        listMap[count + 1]!.pushRight(key)
+    private func counter(_ node: ListNode) {
+        let count = node.freq
+        listMap[count]!.pop(node)
 
         if count == lfuCount && listMap[count]!.length() == 0 {
             lfuCount += 1
         }
+
+        node.freq += 1
+        if listMap[node.freq] == nil {
+            listMap[node.freq] = LinkedList()
+        }
+        listMap[node.freq]!.pushRight(node)
     }
 
     func get(_ key: Int) -> Int {
-        guard let value = valMap[key] else {
+        guard let node = nodeMap[key] else {
             return -1
         }
-        counter(key)
-        return value
+        counter(node)
+        return node.val
     }
 
     func put(_ key: Int, _ value: Int) {
         if capacity == 0 { return }
 
-        if valMap[key] == nil && valMap.count == capacity {
-            let toRemove = listMap[lfuCount]!.popLeft()
-            valMap.removeValue(forKey: toRemove)
-            countMap.removeValue(forKey: toRemove)
+        if let node = nodeMap[key] {
+            node.val = value
+            counter(node)
+            return
         }
 
-        valMap[key] = value
-        if countMap[key] == nil {
-            countMap[key] = 0
-            listMap[0]!.pushRight(key)
-            lfuCount = 0
+        if nodeMap.count == capacity {
+            let toRemove = listMap[lfuCount]!.popLeft()
+            nodeMap.removeValue(forKey: toRemove.key)
         }
-        counter(key)
+
+        let node = ListNode(key, value)
+        nodeMap[key] = node
+        if listMap[1] == nil {
+            listMap[1] = LinkedList()
+        }
+        listMap[1]!.pushRight(node)
+        lfuCount = 1
     }
 }
 ```
 
 ```rust
 struct DLNode {
+    key: i32,
     val: i32,
+    freq: i32,
     prev: usize,
     next: usize,
 }
 
 struct DoublyLinkedList {
-    nodes: Vec<DLNode>,
     left: usize,
     right: usize,
-    map: HashMap<i32, usize>,
-}
-
-impl DoublyLinkedList {
-    fn new() -> Self {
-        let nodes = vec![
-            DLNode { val: 0, prev: 0, next: 1 }, // sentinel left (index 0)
-            DLNode { val: 0, prev: 0, next: 1 }, // sentinel right (index 1)
-        ];
-        DoublyLinkedList {
-            nodes,
-            left: 0,
-            right: 1,
-            map: HashMap::new(),
-        }
-    }
-
-    fn length(&self) -> usize {
-        self.map.len()
-    }
-
-    fn push_right(&mut self, val: i32) {
-        let prev = self.nodes[self.right].prev;
-        let idx = self.nodes.len();
-        self.nodes.push(DLNode { val, prev, next: self.right });
-        self.map.insert(val, idx);
-        self.nodes[prev].next = idx;
-        self.nodes[self.right].prev = idx;
-    }
-
-    fn pop(&mut self, val: i32) {
-        if let Some(&idx) = self.map.get(&val) {
-            let prev = self.nodes[idx].prev;
-            let next = self.nodes[idx].next;
-            self.nodes[prev].next = next;
-            self.nodes[next].prev = prev;
-            self.map.remove(&val);
-        }
-    }
-
-    fn pop_left(&mut self) -> i32 {
-        let left_next = self.nodes[self.left].next;
-        let res = self.nodes[left_next].val;
-        self.pop(res);
-        res
-    }
+    size: usize,
 }
 
 struct LFUCache {
     capacity: usize,
     lfu_count: i32,
-    val_map: HashMap<i32, i32>,
-    count_map: HashMap<i32, i32>,
+    next_id: usize,
+    nodes: HashMap<usize, DLNode>,
+    node_map: HashMap<i32, usize>,
     list_map: HashMap<i32, DoublyLinkedList>,
 }
 
 impl LFUCache {
     fn new(capacity: i32) -> Self {
-        let mut list_map = HashMap::new();
-        list_map.insert(0, DoublyLinkedList::new());
         LFUCache {
             capacity: capacity as usize,
             lfu_count: 0,
-            val_map: HashMap::new(),
-            count_map: HashMap::new(),
-            list_map,
+            next_id: 0,
+            nodes: HashMap::new(),
+            node_map: HashMap::new(),
+            list_map: HashMap::new(),
         }
+    }
+
+    fn make_list(&mut self) -> DoublyLinkedList {
+        let left = self.next_id;
+        self.next_id += 1;
+        let right = self.next_id;
+        self.next_id += 1;
+
+        self.nodes.insert(left, DLNode { key: 0, val: 0, freq: 0, prev: left, next: right });
+        self.nodes.insert(right, DLNode { key: 0, val: 0, freq: 0, prev: left, next: right });
+
+        DoublyLinkedList { left, right, size: 0 }
+    }
+
+    fn ensure_list(&mut self, freq: i32) {
+        if !self.list_map.contains_key(&freq) {
+            let list = self.make_list();
+            self.list_map.insert(freq, list);
+        }
+    }
+
+    fn push_right(&mut self, freq: i32, idx: usize) {
+        self.ensure_list(freq);
+        let right = self.list_map.get(&freq).unwrap().right;
+        let prev = self.nodes.get(&right).unwrap().prev;
+
+        self.nodes.get_mut(&prev).unwrap().next = idx;
+        {
+            let node = self.nodes.get_mut(&idx).unwrap();
+            node.prev = prev;
+            node.next = right;
+        }
+        self.nodes.get_mut(&right).unwrap().prev = idx;
+        self.list_map.get_mut(&freq).unwrap().size += 1;
+    }
+
+    fn pop(&mut self, freq: i32, idx: usize) {
+        let (prev, next) = {
+            let node = self.nodes.get(&idx).unwrap();
+            (node.prev, node.next)
+        };
+
+        self.nodes.get_mut(&prev).unwrap().next = next;
+        self.nodes.get_mut(&next).unwrap().prev = prev;
+        {
+            let node = self.nodes.get_mut(&idx).unwrap();
+            node.prev = idx;
+            node.next = idx;
+        }
+        self.list_map.get_mut(&freq).unwrap().size -= 1;
+    }
+
+    fn pop_left(&mut self, freq: i32) -> usize {
+        let left = self.list_map.get(&freq).unwrap().left;
+        let idx = self.nodes.get(&left).unwrap().next;
+        self.pop(freq, idx);
+        idx
     }
 
     fn counter(&mut self, key: i32) {
-        let count = *self.count_map.get(&key).unwrap();
-        self.count_map.insert(key, count + 1);
+        let idx = *self.node_map.get(&key).unwrap();
+        let count = self.nodes.get(&idx).unwrap().freq;
+        self.pop(count, idx);
 
-        self.list_map.entry(count).or_insert_with(DoublyLinkedList::new).pop(key);
-        self.list_map.entry(count + 1).or_insert_with(DoublyLinkedList::new).push_right(key);
-
-        if count == self.lfu_count && self.list_map.get(&count).unwrap().length() == 0 {
+        if count == self.lfu_count && self.list_map.get(&count).unwrap().size == 0 {
             self.lfu_count += 1;
         }
+
+        self.nodes.get_mut(&idx).unwrap().freq += 1;
+        let next_freq = self.nodes.get(&idx).unwrap().freq;
+        self.push_right(next_freq, idx);
     }
 
     fn get(&mut self, key: i32) -> i32 {
-        if !self.val_map.contains_key(&key) {
+        if !self.node_map.contains_key(&key) {
             return -1;
         }
         self.counter(key);
-        *self.val_map.get(&key).unwrap()
+        let idx = *self.node_map.get(&key).unwrap();
+        self.nodes.get(&idx).unwrap().val
     }
 
     fn put(&mut self, key: i32, value: i32) {
@@ -1605,19 +1629,25 @@ impl LFUCache {
             return;
         }
 
-        if !self.val_map.contains_key(&key) && self.val_map.len() == self.capacity {
-            let to_remove = self.list_map.get_mut(&self.lfu_count).unwrap().pop_left();
-            self.val_map.remove(&to_remove);
-            self.count_map.remove(&to_remove);
+        if let Some(&idx) = self.node_map.get(&key) {
+            self.nodes.get_mut(&idx).unwrap().val = value;
+            self.counter(key);
+            return;
         }
 
-        self.val_map.insert(key, value);
-        if !self.count_map.contains_key(&key) {
-            self.count_map.insert(key, 0);
-            self.list_map.entry(0).or_insert_with(DoublyLinkedList::new).push_right(key);
-            self.lfu_count = 0;
+        if self.node_map.len() == self.capacity {
+            let idx = self.pop_left(self.lfu_count);
+            let old_key = self.nodes.get(&idx).unwrap().key;
+            self.node_map.remove(&old_key);
+            self.nodes.remove(&idx);
         }
-        self.counter(key);
+
+        let idx = self.next_id;
+        self.next_id += 1;
+        self.nodes.insert(idx, DLNode { key, val: value, freq: 1, prev: idx, next: idx });
+        self.node_map.insert(key, idx);
+        self.push_right(1, idx);
+        self.lfu_count = 1;
     }
 }
 ```
@@ -1635,9 +1665,9 @@ impl LFUCache {
 
 ## Common Pitfalls
 
-### Forgetting to Update Minimum Frequency After Eviction
+### Not Resetting Minimum Frequency on New Insertions
 
-When inserting a new key after eviction, the minimum frequency must be reset to 1 (since the new key starts with frequency 1). Failing to update `lfuCount` causes subsequent evictions to look in the wrong frequency bucket, potentially evicting recently accessed items or causing errors.
+When inserting a new key, the minimum frequency tracker must reflect that the new key starts at frequency 1. Failing to update `lfuCount` causes subsequent evictions to look in the wrong frequency bucket, potentially evicting the wrong item or causing errors.
 
 ### Not Incrementing Frequency on Both Get and Put
 
@@ -1651,6 +1681,6 @@ When multiple keys share the same minimum frequency, the least recently used amo
 
 When the cache capacity is 0, all `put()` operations should be no-ops since nothing can be stored. Forgetting this check causes attempts to evict from an empty cache, leading to errors or incorrect behavior.
 
-### Failing to Move Keys Between Frequency Lists
+### Failing to Move Nodes Between Frequency Lists
 
-When a key's frequency increases, it must be removed from its current frequency list and added to the next frequency list. Forgetting to remove it from the old list causes the key to appear in multiple frequency buckets, corrupting the data structure and causing incorrect evictions.
+When a key's frequency increases, its node must be removed from the current frequency list and added to the next one. Forgetting to remove it from the old list causes the same entry to appear in multiple frequency buckets, corrupting the data structure and causing incorrect evictions.
